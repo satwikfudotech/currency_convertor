@@ -1,5 +1,4 @@
 package function
-
 import (
 	"encoding/json"
 	"fmt"
@@ -23,64 +22,56 @@ type Response struct {
 	Error     string  `json:"error,omitempty"`
 }
 
-// Handler for Google Cloud Function
 func Converter(w http.ResponseWriter, r *http.Request) {
-	// Allow CORS for frontend usage
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method == http.MethodOptions {
-		// Handle preflight request
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	if r.Method == "OPTIONS" {
+		w.Header().Set("Access-Control-Allow-Methods", "POST")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(204)
 		return
 	}
 
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+		sendError(w, "Invalid JSON format", 400)
 		return
 	}
 
-	// Validate input
 	if req.Amount <= 0 {
-		http.Error(w, `{"error":"Amount must be positive"}`, http.StatusBadRequest)
+		sendError(w, "Amount must be positive", 400)
 		return
 	}
+
+	req.From = strings.ToUpper(strings.TrimSpace(req.From))
+	req.To = strings.ToUpper(strings.TrimSpace(req.To))
 	if len(req.From) != 3 || len(req.To) != 3 {
-		http.Error(w, `{"error":"Currency codes must be 3 letters"}`, http.StatusBadRequest)
+		sendError(w, "Currency codes must be 3 letters", 400)
 		return
 	}
 
 	apiKey := os.Getenv("FIXER_API_KEY")
 	if apiKey == "" {
-		http.Error(w, `{"error":"API key not set"}`, http.StatusInternalServerError)
+		sendError(w, "Fixer API key not configured", 500)
 		return
 	}
 
-	from := strings.ToUpper(req.From)
-	to := strings.ToUpper(req.To)
-
-	// Get rates from Fixer.io
-	rates, err := getRates(apiKey, from, to)
+	rates, err := getRates(apiKey, req.From, req.To)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+		sendError(w, fmt.Sprintf("API error: %v", err), 500)
 		return
 	}
 
-	fromRate := 1.0
-	if from != "EUR" {
-		r, ok := rates[from]
-		if !ok {
-			http.Error(w, `{"error":"Invalid source currency"}`, http.StatusBadRequest)
-			return
-		}
-		fromRate = r
-	}
-	toRate, ok := rates[to]
+	fromRate, ok := rates[req.From]
 	if !ok {
-		http.Error(w, `{"error":"Invalid target currency"}`, http.StatusBadRequest)
+		sendError(w, "Invalid source currency", 400)
+		return
+	}
+
+	toRate, ok := rates[req.To]
+	if !ok {
+		sendError(w, "Invalid target currency", 400)
 		return
 	}
 
@@ -93,17 +84,14 @@ func Converter(w http.ResponseWriter, r *http.Request) {
 		converted = convertWithoutPointers(req.Amount, fromRate, toRate)
 	}
 
-	resp := Response{
+	json.NewEncoder(w).Encode(Response{
 		Converted: converted,
-		Currency:  to,
+		Currency:  req.To,
 		Method:    method,
-	}
-	json.NewEncoder(w).Encode(resp)
+	})
 }
 
-// Fetch rates from Fixer.io
 func getRates(apiKey, from, to string) (map[string]float64, error) {
-	// Fixer.io free plan only allows EUR as base, so we fetch both rates relative to EUR
 	url := fmt.Sprintf("https://api.apilayer.com/fixer/latest?symbols=%s,%s", from, to)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("apikey", apiKey)
@@ -111,28 +99,34 @@ func getRates(apiKey, from, to string) (map[string]float64, error) {
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reach Fixer.io: %v", err)
+		return nil, fmt.Errorf("network error: %v", err)
 	}
 	defer res.Body.Close()
 
-	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("Fixer.io error: %s", body)
+		body, _ := io.ReadAll(res.Body)
+		return nil, fmt.Errorf("Fixer API error [%d]: %s", res.StatusCode, string(body))
 	}
 
-	var data struct {
+	var result struct {
 		Rates map[string]float64 `json:"rates"`
 	}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("failed to parse Fixer.io response")
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("invalid API response: %v", err)
 	}
-	return data.Rates, nil
+
+	return result.Rates, nil
 }
 
-// Conversion functions
+func sendError(w http.ResponseWriter, message string, code int) {
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(Response{Error: message})
+}
+
 func convertWithoutPointers(amount, fromRate, toRate float64) float64 {
 	return amount * (toRate / fromRate)
 }
+
 func convertWithPointers(amount float64, fromRate, toRate *float64) float64 {
 	return amount * (*toRate / *fromRate)
 }
