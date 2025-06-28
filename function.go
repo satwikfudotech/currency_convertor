@@ -1,7 +1,6 @@
 package function
 
 import (
-	
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"os"
 )
 
-// Structs for request and response
 type ConvertRequest struct {
 	Amount float64 `json:"amount"`
 	From   string  `json:"from"`
@@ -21,14 +19,13 @@ type ConvertResponse struct {
 	Message   string  `json:"message"`
 }
 
-// Struct for Fixer API response
 type FixerAPIResponse struct {
 	Base  string             `json:"base"`
 	Rates map[string]float64 `json:"rates"`
 }
 
-// Main entry point for Cloud Function
-func ConvertCurrency(w http.ResponseWriter, r *http.Request) {
+// ✅ THIS is the function that must match --entry-point=Converter
+func Converter(w http.ResponseWriter, r *http.Request) {
 	var req ConvertRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -38,11 +35,10 @@ func ConvertCurrency(w http.ResponseWriter, r *http.Request) {
 
 	apiKey := os.Getenv("FIXER_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "Fixer API key not found", http.StatusInternalServerError)
+		http.Error(w, "API Key not found", http.StatusInternalServerError)
 		return
 	}
 
-	// Fetch exchange rates
 	url := fmt.Sprintf("https://data.fixer.io/api/latest?access_key=%s", apiKey)
 	resp, err := http.Get(url)
 	if err != nil || resp.StatusCode != 200 {
@@ -63,19 +59,11 @@ func ConvertCurrency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert: amount -> EUR -> target
-	eurAmount := req.Amount / fromRate
-	converted := eurAmount * toRate
+	eur := req.Amount / fromRate
+	converted := eur * toRate
 
-	// Send response
 	json.NewEncoder(w).Encode(ConvertResponse{
 		Converted: converted,
 		Message:   fmt.Sprintf("%.2f %s = %.2f %s", req.Amount, req.From, converted, req.To),
 	})
-}
-
-// For Cloud Functions deployment
-func init() {
-	// Use the Functions Framework routing
-	http.HandleFunc("/", ConvertCurrency)
 }
