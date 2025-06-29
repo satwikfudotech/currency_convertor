@@ -30,29 +30,22 @@ func Converter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ✅ Free API, no key required
 	url := fmt.Sprintf("https://api.exchangerate.host/latest?base=%s", req.Base)
+
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("HTTP GET failed: %v\n", err)
 		http.Error(w, "Failed to fetch exchange rates", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
-	// 👇 Dump raw response body for debugging
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	fmt.Println("API Raw Response:", string(bodyBytes))
 
-	// 👇 Decode again from the saved body
 	var rateResp RateResponse
 	if err := json.Unmarshal(bodyBytes, &rateResp); err != nil {
-		fmt.Printf("JSON unmarshal error: %v\n", err)
 		http.Error(w, "Failed to parse API response", http.StatusInternalServerError)
-		return
-	}
-
-	if rateResp.Base == "" || rateResp.Rates == nil {
-		http.Error(w, "Invalid currency code or empty API response", http.StatusBadRequest)
 		return
 	}
 
