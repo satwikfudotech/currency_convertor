@@ -6,51 +6,54 @@ import (
 	"net/http"
 )
 
-// Input request structure
 type RateRequest struct {
-	Base string `json:"base"` // Example: "INR", "USD", etc.
+	Base string `json:"base"` // "INR", "USD", etc.
 }
 
-// Output response structure
 type RateResponse struct {
 	Base  string             `json:"base"`
 	Rates map[string]float64 `json:"rates"`
 }
 
-// Main function to handle HTTP request
 func Converter(w http.ResponseWriter, r *http.Request) {
-	// Parse JSON request body
+	// Parse incoming JSON
 	var req RateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	// If base currency is not provided
+	// Log incoming base currency
+	fmt.Println("Received base:", req.Base)
+
 	if req.Base == "" {
 		http.Error(w, "Base currency is required", http.StatusBadRequest)
 		return
 	}
 
-	// Build URL using free ExchangeRate.host API
+	// Build API request
 	url := fmt.Sprintf("https://api.exchangerate.host/latest?base=%s", req.Base)
-
-	// Make the HTTP request to fetch exchange rates
 	resp, err := http.Get(url)
 	if err != nil || resp.StatusCode != 200 {
-		http.Error(w, "Failed to fetch exchange rates", http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch rates", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
-	// Parse API response into RateResponse struct
+	// Parse API response
 	var rateResp RateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rateResp); err != nil {
-		http.Error(w, "Failed to parse exchange data", http.StatusInternalServerError)
+		http.Error(w, "Error decoding API response", http.StatusInternalServerError)
 		return
 	}
 
-	// Return JSON response
+	// Handle empty API response
+	if rateResp.Base == "" || rateResp.Rates == nil {
+		http.Error(w, "Invalid currency code or empty API response", http.StatusBadRequest)
+		return
+	}
+
+	// Return response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rateResp)
 }
